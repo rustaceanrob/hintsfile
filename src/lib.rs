@@ -1,4 +1,7 @@
-use std::io::{Read, Write};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+};
 
 /// An encoding scheme for representing a list of monotonically increasing elements.
 #[derive(Debug)]
@@ -194,6 +197,37 @@ impl EliasFano {
     #[inline]
     pub fn write<W: Write>(self, writer: &mut W) -> Result<(), std::io::Error> {
         writer.write_all(&self.serialize())
+    }
+}
+
+/// A file of hints for the UTXO set.
+#[derive(Debug)]
+pub struct Hintsfile {
+    map: BTreeMap<u32, EliasFano>,
+    height: u32,
+}
+
+impl Hintsfile {
+    /// Build a hintsfile from a buffer, like a file on disk. This reads the entire hintsfile into
+    /// memory. To query one block at a time from a file, see [`EliasFano::from_reader`].
+    pub fn from_reader<R: Read>(reader: &mut R) -> Self {
+        let mut height = 1;
+        let mut map = BTreeMap::new();
+        while let Ok(ef) = EliasFano::from_reader(reader) {
+            map.insert(height, ef);
+            height += 1;
+        }
+        Self { map, height }
+    }
+
+    /// Get the unspent indices for a block height. Returns `None` if unavailable.
+    pub fn indices_at_height(&self, height: u32) -> Option<Vec<u16>> {
+        self.map.get(&height).map(|ef| ef.decompress())
+    }
+
+    /// The last height this file encodes for.
+    pub fn stop_height(&self) -> u32 {
+        self.height
     }
 }
 
