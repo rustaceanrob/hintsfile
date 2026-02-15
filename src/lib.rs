@@ -1,6 +1,9 @@
+use std::io::Read;
+
 #[derive(Debug)]
 pub struct EliasFano {
     n: u16,
+    m: u16,
     low_bits: u8,
     low: Vec<u8>,
     high: Vec<u8>,
@@ -13,6 +16,7 @@ impl EliasFano {
         if elements.is_empty() {
             return Self {
                 n: 0,
+                m: 0,
                 low_bits: 0,
                 low: Vec::new(),
                 high: Vec::new(),
@@ -26,11 +30,47 @@ impl EliasFano {
         let high = Self::unary_encode_high_bits(elements, l);
         Self {
             n,
+            m,
             low_bits: l,
             low,
             high,
         }
         // let total_lower_bytes = (n as u32 * l as u32).div_ceil(8) as usize;
+    }
+
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
+        let mut n_buf = [0u8; 2];
+        reader.read_exact(&mut n_buf)?;
+        let n = u16::from_le_bytes(n_buf);
+        if n == 0 {
+            return Ok(Self {
+                n,
+                m: 0x00,
+                low_bits: 0x00,
+                low: Vec::new(),
+                high: Vec::new(),
+            });
+        }
+        let mut m_buf = [0u8; 2];
+        reader.read_exact(&mut m_buf)?;
+        let m = u16::from_le_bytes(m_buf);
+        let mut l_buf = [0u8; 1];
+        reader.read_exact(&mut l_buf)?;
+        let l = u8::from_le_bytes(l_buf);
+        let low_bytes = (n as usize * l as usize).div_ceil(8);
+        let mut low_buf = vec![0u8; low_bytes];
+        reader.read_exact(&mut low_buf)?;
+        debug_assert!(m != u16::MAX);
+        let high_bytes = (n as usize + (m >> l) as usize + 1).div_ceil(8);
+        let mut high_buf = vec![0u8; high_bytes];
+        reader.read_exact(&mut high_buf)?;
+        Ok(Self {
+            n,
+            m,
+            low_bits: l,
+            low: low_buf,
+            high: high_buf,
+        })
     }
 
     #[inline]
@@ -92,5 +132,10 @@ impl EliasFano {
             high.push(curr_byte);
         }
         high
+    }
+
+    #[inline]
+    pub fn size(&self) -> usize {
+        size_of::<u16>() + size_of::<u16>() + size_of::<u8>() + self.low.len() + self.high.len()
     }
 }
