@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::io::{Read, Write};
 
 /// An encoding scheme for representing a list of monotonically increasing elements.
 #[derive(Debug)]
@@ -91,6 +91,7 @@ impl EliasFano {
         high
     }
 
+    /// Decompress the ascending indices.
     pub fn decompress(&self) -> Vec<u16> {
         let mut indices = Vec::with_capacity(self.n as usize);
         if self.n == 0 {
@@ -175,10 +176,31 @@ impl EliasFano {
             high: high_buf,
         })
     }
+
+    /// Serialize this representation to bytes.
+    #[inline]
+    pub fn serialize(self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(self.size());
+        bytes.extend_from_slice(&self.n.to_le_bytes());
+        if self.n == 0 {
+            return bytes;
+        }
+        bytes.extend_from_slice(&self.m.to_le_bytes());
+        bytes.extend_from_slice(&self.low);
+        bytes.extend_from_slice(&self.high);
+        bytes
+    }
+
+    #[inline]
+    pub fn write<W: Write>(self, writer: &mut W) -> Result<(), std::io::Error> {
+        writer.write_all(&self.serialize())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufReader;
+
     use super::EliasFano;
 
     #[test]
@@ -199,5 +221,22 @@ mod tests {
         let ef = EliasFano::compress(&elms);
         let items = ef.decompress();
         assert_eq!(items, elms);
+    }
+
+    #[test]
+    fn serde() {
+        let mut want = Vec::new();
+        for i in 0..(u16::MAX - 1) {
+            if !i.is_multiple_of(21) || !i.is_multiple_of(11) {
+                want.push(i);
+            }
+        }
+        let ef = EliasFano::compress(&want);
+        let mut ef_buf = Vec::new();
+        ef.write(&mut ef_buf).unwrap();
+        let mut buf_reader = BufReader::new(ef_buf.as_slice());
+        let ef = EliasFano::from_reader(&mut buf_reader).unwrap();
+        let got = ef.decompress();
+        assert_eq!(want, got);
     }
 }
