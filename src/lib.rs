@@ -91,6 +91,45 @@ impl EliasFano {
         high
     }
 
+    pub fn decompress(&self) -> Vec<u16> {
+        let mut indices = Vec::with_capacity(self.n as usize);
+        if self.n == 0 {
+            return indices;
+        }
+        let l = Self::l(self.m, self.n);
+        let mut low_byte_pos = 0x00;
+        let mut low_bit_pos = 0x00;
+        let mut high_byte_pos: usize = 0;
+        let mut high_bit_pos: u8 = 0;
+        let mut high_prefix: u16 = 0;
+        for _ in 0..self.n {
+            let mut low_val: u16 = 0;
+            for shift in 0..l {
+                let bit = (self.low[low_byte_pos] >> (7 - low_bit_pos)) & 1;
+                low_val |= (bit as u16) << shift;
+                low_bit_pos += 1;
+                if low_bit_pos == 8 {
+                    low_byte_pos += 1;
+                    low_bit_pos = 0;
+                }
+            }
+            loop {
+                let bit = (self.high[high_byte_pos] >> (7 - high_bit_pos)) & 1;
+                high_bit_pos += 1;
+                if high_bit_pos == 8 {
+                    high_byte_pos += 1;
+                    high_bit_pos = 0;
+                }
+                if bit == 1 {
+                    break;
+                }
+                high_prefix += 1;
+            }
+            indices.push((high_prefix << l) | low_val);
+        }
+        indices
+    }
+
     /// Size of the representation in bytes.
     #[inline]
     pub fn size(&self) -> usize {
@@ -135,5 +174,30 @@ impl EliasFano {
             low: low_buf,
             high: high_buf,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EliasFano;
+
+    #[test]
+    fn compress_decompress() {
+        let mut elms = Vec::new();
+        let ef = EliasFano::compress(&elms);
+        assert!(ef.decompress().is_empty());
+        elms.push(42);
+        let ef = EliasFano::compress(&elms);
+        let items = ef.decompress();
+        assert_eq!(items, elms);
+        elms.clear();
+        for i in 0..(u16::MAX - 1) {
+            if !i.is_multiple_of(7) || i.is_power_of_two() || !i.is_multiple_of(13) {
+                elms.push(i);
+            }
+        }
+        let ef = EliasFano::compress(&elms);
+        let items = ef.decompress();
+        assert_eq!(items, elms);
     }
 }
