@@ -169,7 +169,7 @@ impl EliasFano {
         let mut low_buf = vec![0u8; low_bytes];
         reader.read_exact(&mut low_buf)?;
         debug_assert!(m != u16::MAX);
-        let high_bytes = (n as usize + (m >> l) as usize + 1).div_ceil(8);
+        let high_bytes = (n as usize + (m >> l) as usize).div_ceil(8);
         let mut high_buf = vec![0u8; high_bytes];
         reader.read_exact(&mut high_buf)?;
         Ok(Self {
@@ -204,7 +204,6 @@ impl EliasFano {
 #[derive(Debug)]
 pub struct Hintsfile {
     map: BTreeMap<u32, EliasFano>,
-    height: u32,
 }
 
 impl Hintsfile {
@@ -217,7 +216,7 @@ impl Hintsfile {
             map.insert(height, ef);
             height += 1;
         }
-        Self { map, height }
+        Self { map }
     }
 
     /// Get the unspent indices for a block height. Returns `None` if unavailable.
@@ -227,7 +226,7 @@ impl Hintsfile {
 
     /// The last height this file encodes for.
     pub fn stop_height(&self) -> u32 {
-        self.height
+        self.map.keys().max().copied().unwrap_or_default()
     }
 }
 
