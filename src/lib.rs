@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     collections::BTreeMap,
     io::{Read, Write},
@@ -207,16 +208,29 @@ pub struct Hintsfile {
 }
 
 impl Hintsfile {
+    const MAGIC: [u8; 4] = [0x55, 0x54, 0x58, 0x4f];
+    const VERSION: u8 = 0x00;
     /// Build a hintsfile from a buffer, like a file on disk. This reads the entire hintsfile into
     /// memory. To query one block at a time from a file, see [`EliasFano::from_reader`].
-    pub fn from_reader<R: Read>(reader: &mut R) -> Self {
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self, ReadError> {
+        let mut magic_buf = [0u8; 4];
+        reader.read_exact(&mut magic_buf)?;
+        if magic_buf != (Self::MAGIC) {
+            return Err(ReadError::UnknownMagic(magic_buf));
+        }
+        let mut version_buf = [0u8; 1];
+        reader.read_exact(&mut version_buf)?;
+        let version = u8::from_le_bytes(version_buf);
+        if version != Self::VERSION {
+            return Err(ReadError::UnsupportedVersion(version));
+        }
         let mut height = 1;
         let mut map = BTreeMap::new();
         while let Ok(ef) = EliasFano::from_reader(reader) {
             map.insert(height, ef);
             height += 1;
         }
-        Self { map }
+        Ok(Self { map })
     }
 
     /// Get the unspent indices for a block height. Returns `None` if unavailable.
@@ -230,9 +244,62 @@ impl Hintsfile {
     }
 }
 
+/// Error reading a hintsfile from a buffer.
+#[derive(Debug)]
+pub enum ReadError {
+    Io(std::io::Error),
+    UnknownMagic([u8; 4]),
+    UnsupportedVersion(u8),
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(io) => write!(f, "io error: {io}"),
+            Self::UnknownMagic(magic) => write!(f, "unknown magic: {magic:?}"),
+            Self::UnsupportedVersion(v) => write!(f, "unsupported version: {v}"),
+        }
+    }
+}
+
+impl std::error::Error for ReadError {}
+
+impl From<std::io::Error> for ReadError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+/// Build a hintsfile iteratively.
+#[derive(Debug)]
+pub struct HintsfileBuilder<W: Write> {
+    writer: W,
+}
+
+impl<W: Write> HintsfileBuilder<W> {
+    /// Initialize a hintsfile to be written to.
+    pub fn start(mut writer: W) -> Result<Self, std::io::Error> {
+        writer.write_all(&Hintsfile::MAGIC)?;
+        writer.write_all(&[Hintsfile::VERSION])?;
+        Ok(Self { writer })
+    }
+
+    /// Append hints for a block, starting from height one.
+    pub fn append(&mut self, encoding: EliasFano) -> Result<(), std::io::Error> {
+        encoding.write(&mut self.writer)
+    }
+
+    /// Flush the buffer.
+    pub fn finish(&mut self) -> Result<(), std::io::Error> {
+        self.writer.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::BufReader;
+
+    use crate::{Hintsfile, HintsfileBuilder};
 
     use super::EliasFano;
 
@@ -271,5 +338,31 @@ mod tests {
         let ef = EliasFano::from_reader(&mut buf_reader).unwrap();
         let got = ef.decompress();
         assert_eq!(want, got);
+    }
+
+    #[test]
+    fn hintsfile_roundtrip() {
+        let want = Vec::new();
+        let mut builder = HintsfileBuilder::start(want).unwrap();
+        for j in 12..16 {
+            let mut nums = Vec::new();
+            for i in 0..(u16::MAX - 1) {
+                if !i.is_multiple_of(j) || !i.is_multiple_of(j >> 1) || i.is_multiple_of(7) {
+                    nums.push(i)
+                }
+            }
+            let ef = EliasFano::compress(&nums);
+            builder.append(ef).unwrap();
+        }
+        let mut buf_reader = BufReader::new(builder.writer.as_slice());
+        let hintsfile = Hintsfile::from_reader(&mut buf_reader).unwrap();
+        assert_eq!(hintsfile.stop_height(), 4);
+        let mut nums = Vec::new();
+        for i in 0..(u16::MAX - 1) {
+            if !i.is_multiple_of(14) || !i.is_multiple_of(14 >> 1) || i.is_multiple_of(7) {
+                nums.push(i)
+            }
+        }
+        assert_eq!(hintsfile.indices_at_height(3).unwrap(), nums);
     }
 }
