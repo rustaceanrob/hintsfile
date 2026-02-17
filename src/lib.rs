@@ -7,17 +7,17 @@ use std::{
 /// An encoding scheme for representing a list of monotonically increasing elements.
 #[derive(Debug)]
 pub struct EliasFano {
-    n: u16,
-    m: u16,
+    n: u32,
+    m: u32,
     low: Vec<u8>,
     high: Vec<u8>,
 }
 
 impl EliasFano {
     /// Compress a unique, ordered set of elements.
-    pub fn compress(elements: &[u16]) -> Self {
+    pub fn compress(elements: &[u32]) -> Self {
         debug_assert!(elements.is_sorted());
-        debug_assert!(elements.len() < u16::MAX as usize);
+        debug_assert!(elements.len() < u32::MAX as usize);
         if elements.is_empty() {
             return Self {
                 n: 0,
@@ -27,7 +27,7 @@ impl EliasFano {
             };
         }
         let m = *elements.last().expect("elements is non-empty.");
-        let n = elements.len() as u16;
+        let n = elements.len() as u32;
         let l = Self::l(m, n);
         let low = Self::pack_low_bits(elements, l);
         let high = Self::unary_encode_high_bits(elements, l);
@@ -35,13 +35,13 @@ impl EliasFano {
     }
 
     #[inline]
-    fn pack_low_bits(elements: &[u16], l: u8) -> Vec<u8> {
+    fn pack_low_bits(elements: &[u32], l: u8) -> Vec<u8> {
         let mut packed = Vec::new();
         if l == 0 {
             return packed;
         }
         debug_assert!(l < 16);
-        let mask = (1u16 << l) - 1;
+        let mask = (1u32 << l) - 1;
         let mut curr_byte = 0x00;
         let mut bit_pos = 0x00;
         for &element in elements {
@@ -64,7 +64,7 @@ impl EliasFano {
     }
 
     #[inline]
-    fn unary_encode_high_bits(elements: &[u16], l: u8) -> Vec<u8> {
+    fn unary_encode_high_bits(elements: &[u32], l: u8) -> Vec<u8> {
         let mut high = Vec::new();
         let mut curr_byte = 0x00;
         let mut bit_pos = 0x00;
@@ -96,7 +96,7 @@ impl EliasFano {
     }
 
     /// Decompress the ascending indices.
-    pub fn decompress(&self) -> Vec<u16> {
+    pub fn decompress(&self) -> Vec<u32> {
         let mut indices = Vec::with_capacity(self.n as usize);
         if self.n == 0 {
             return indices;
@@ -106,12 +106,12 @@ impl EliasFano {
         let mut low_bit_pos = 0x00;
         let mut high_byte_pos: usize = 0;
         let mut high_bit_pos: u8 = 0;
-        let mut high_prefix: u16 = 0;
+        let mut high_prefix: u32 = 0;
         for _ in 0..self.n {
-            let mut low_val: u16 = 0;
+            let mut low_val: u32 = 0;
             for shift in 0..l {
                 let bit = (self.low[low_byte_pos] >> (7 - low_bit_pos)) & 1;
-                low_val |= (bit as u16) << shift;
+                low_val |= (bit as u32) << shift;
                 low_bit_pos += 1;
                 if low_bit_pos == 8 {
                     low_byte_pos += 1;
@@ -138,22 +138,22 @@ impl EliasFano {
     /// Size of the representation in bytes.
     #[inline]
     pub fn size(&self) -> usize {
-        size_of::<u16>() + size_of::<u16>() + self.low.len() + self.high.len()
+        size_of::<u32>() + size_of::<u32>() + self.low.len() + self.high.len()
     }
 
     /// The number of lower bits in the representation, floor(log_2((`m` + 1)/ `n`)) where `n` is
     /// the size of the list and `m` is the largest element.
     #[inline]
-    const fn l(m: u16, n: u16) -> u8 {
-        debug_assert!(m != u16::MAX);
+    const fn l(m: u32, n: u32) -> u8 {
+        debug_assert!(m != u32::MAX);
         ((m + 1) / n).ilog2() as u8
     }
 
     /// Read a list representation from disk.
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let mut n_buf = [0u8; 2];
+        let mut n_buf = [0u8; 4];
         reader.read_exact(&mut n_buf)?;
-        let n = u16::from_le_bytes(n_buf);
+        let n = u32::from_le_bytes(n_buf);
         if n == 0 {
             return Ok(Self {
                 n,
@@ -162,14 +162,14 @@ impl EliasFano {
                 high: Vec::new(),
             });
         }
-        let mut m_buf = [0u8; 2];
+        let mut m_buf = [0u8; 4];
         reader.read_exact(&mut m_buf)?;
-        let m = u16::from_le_bytes(m_buf);
+        let m = u32::from_le_bytes(m_buf);
         let l = Self::l(m, n);
         let low_bytes = (n as usize * l as usize).div_ceil(8);
         let mut low_buf = vec![0u8; low_bytes];
         reader.read_exact(&mut low_buf)?;
-        debug_assert!(m != u16::MAX);
+        debug_assert!(m != u32::MAX);
         let high_bytes = (n as usize + (m >> l) as usize).div_ceil(8);
         let mut high_buf = vec![0u8; high_bytes];
         reader.read_exact(&mut high_buf)?;
@@ -236,13 +236,13 @@ impl Hintsfile {
     }
 
     /// Get the unspent indices for a block height. Returns `None` if unavailable.
-    pub fn indices_at_height(&self, height: u32) -> Option<Vec<u16>> {
+    pub fn indices_at_height(&self, height: u32) -> Option<Vec<u32>> {
         self.map.get(&height).map(|ef| ef.decompress())
     }
 
     /// Get the unspent indices for a block height and remove them from memory. Returns `None` if
-    /// unavaiable.
-    pub fn take_indices(&mut self, height: u32) -> Option<Vec<u16>> {
+    /// unavailable.
+    pub fn take_indices(&mut self, height: u32) -> Option<Vec<u32>> {
         self.map.remove(&height).map(|ef| ef.decompress())
     }
 
@@ -344,7 +344,7 @@ impl<W: Write> HintsfileBuilder<W, StageInProgress> {
         Ok(())
     }
 
-    /// Finish the hintsfile encoding by checking the expected end height and flusing the buffer.
+    /// Finish the hintsfile encoding by checking the expected end height and flushing the buffer.
     pub fn finish(&mut self) -> Result<(), BuilderError> {
         if self.expected != self.curr {
             return Err(BuilderError::UnexpectedEndHeight(self.curr));
@@ -365,7 +365,9 @@ impl fmt::Display for BuilderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(io) => write!(f, "io error: {io}"),
-            Self::UnexpectedEndHeight(height) => write!(f, "height does not match initialization: {height}"),
+            Self::UnexpectedEndHeight(height) => {
+                write!(f, "height does not match initialization: {height}")
+            }
         }
     }
 }
@@ -396,7 +398,7 @@ mod tests {
         let items = ef.decompress();
         assert_eq!(items, elms);
         elms.clear();
-        for i in 0..(u16::MAX - 1) {
+        for i in 0..67_767u32 {
             if !i.is_multiple_of(7) || i.is_power_of_two() || !i.is_multiple_of(13) {
                 elms.push(i);
             }
@@ -409,7 +411,7 @@ mod tests {
     #[test]
     fn serde() {
         let mut want = Vec::new();
-        for i in 0..(u16::MAX - 1) {
+        for i in 0..67_767u32 {
             if !i.is_multiple_of(21) || !i.is_multiple_of(11) {
                 want.push(i);
             }
@@ -430,7 +432,7 @@ mod tests {
         let mut builder = builder.initialize(4).unwrap();
         for j in 12..16 {
             let mut nums = Vec::new();
-            for i in 0..(u16::MAX - 1) {
+            for i in 0..67_767u32 {
                 if !i.is_multiple_of(j) || !i.is_multiple_of(j >> 1) || i.is_multiple_of(7) {
                     nums.push(i)
                 }
@@ -442,7 +444,7 @@ mod tests {
         let hintsfile = Hintsfile::from_reader(&mut buf_reader).unwrap();
         assert_eq!(hintsfile.stop_height(), 4);
         let mut nums = Vec::new();
-        for i in 0..(u16::MAX - 1) {
+        for i in 0..67_767u32 {
             if !i.is_multiple_of(14) || !i.is_multiple_of(14 >> 1) || i.is_multiple_of(7) {
                 nums.push(i)
             }
