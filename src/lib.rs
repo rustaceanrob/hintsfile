@@ -224,11 +224,13 @@ impl Hintsfile {
         if version != Self::VERSION {
             return Err(ReadError::UnsupportedVersion(version));
         }
-        let mut height = 1;
+        let mut height_buf = [0u8; 4];
+        reader.read_exact(&mut height_buf)?;
+        let stop_height = u32::from_le_bytes(height_buf);
         let mut map = BTreeMap::new();
-        while let Ok(ef) = EliasFano::from_reader(reader) {
+        for height in 1..=stop_height {
+            let ef = EliasFano::from_reader(reader)?;
             map.insert(height, ef);
-            height += 1;
         }
         Ok(Self { map })
     }
@@ -270,28 +272,103 @@ impl From<std::io::Error> for ReadError {
     }
 }
 
-/// Build a hintsfile iteratively.
-#[derive(Debug)]
-pub struct HintsfileBuilder<W: Write> {
-    writer: W,
+/// New hintsfile.
+#[derive(Debug, Clone, Copy)]
+pub struct StageNew;
+
+/// In progress hintsfile.
+#[derive(Debug, Clone, Copy)]
+pub struct StageInProgress;
+
+mod sealed {
+    pub trait Sealed {}
 }
 
-impl<W: Write> HintsfileBuilder<W> {
+impl sealed::Sealed for crate::StageNew {}
+impl sealed::Sealed for crate::StageInProgress {}
+
+/// Stage of hintsfile prgroess.
+pub trait Stage: sealed::Sealed {}
+
+impl Stage for StageNew {}
+impl Stage for StageInProgress {}
+
+/// Build a hintsfile iteratively.
+#[derive(Debug)]
+pub struct HintsfileBuilder<W: Write, S: Stage> {
+    writer: W,
+    _marker: core::marker::PhantomData<S>,
+    curr: u32,
+    expected: u32,
+}
+
+impl<W: Write> HintsfileBuilder<W, StageNew> {
     /// Initialize a hintsfile to be written to.
-    pub fn start(mut writer: W) -> Result<Self, std::io::Error> {
-        writer.write_all(&Hintsfile::MAGIC)?;
-        writer.write_all(&[Hintsfile::VERSION])?;
-        Ok(Self { writer })
+    pub fn new(writer: W) -> HintsfileBuilder<W, StageNew> {
+        Self {
+            writer,
+            _marker: core::marker::PhantomData,
+            curr: 0u32,
+            expected: 0u32,
+        }
     }
 
+    /// Start the builder that will commit to a chain height.
+    pub fn initialize(
+        mut self,
+        height: u32,
+    ) -> Result<HintsfileBuilder<W, StageInProgress>, std::io::Error> {
+        self.writer.write_all(&Hintsfile::MAGIC)?;
+        self.writer.write_all(&[Hintsfile::VERSION])?;
+        self.writer.write_all(&height.to_le_bytes())?;
+        Ok(HintsfileBuilder {
+            writer: self.writer,
+            _marker: core::marker::PhantomData,
+            curr: self.curr,
+            expected: height,
+        })
+    }
+}
+
+impl<W: Write> HintsfileBuilder<W, StageInProgress> {
     /// Append hints for a block, starting from height one.
     pub fn append(&mut self, encoding: EliasFano) -> Result<(), std::io::Error> {
-        encoding.write(&mut self.writer)
+        encoding.write(&mut self.writer)?;
+        self.curr += 1;
+        Ok(())
     }
 
-    /// Flush the buffer.
-    pub fn finish(&mut self) -> Result<(), std::io::Error> {
-        self.writer.flush()
+    /// Finish the hintsfile encoding by checking the expected end height and flusing the buffer.
+    pub fn finish(&mut self) -> Result<(), BuilderError> {
+        if self.expected != self.curr {
+            return Err(BuilderError::UnexpectedEndHeight(self.curr));
+        }
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+/// Error reading a hintsfile from a buffer.
+#[derive(Debug)]
+pub enum BuilderError {
+    Io(std::io::Error),
+    UnexpectedEndHeight(u32),
+}
+
+impl fmt::Display for BuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(io) => write!(f, "io error: {io}"),
+            Self::UnexpectedEndHeight(height) => write!(f, "height does not match initialization: {height}"),
+        }
+    }
+}
+
+impl std::error::Error for BuilderError {}
+
+impl From<std::io::Error> for BuilderError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
     }
 }
 
@@ -343,7 +420,8 @@ mod tests {
     #[test]
     fn hintsfile_roundtrip() {
         let want = Vec::new();
-        let mut builder = HintsfileBuilder::start(want).unwrap();
+        let builder = HintsfileBuilder::new(want);
+        let mut builder = builder.initialize(4).unwrap();
         for j in 12..16 {
             let mut nums = Vec::new();
             for i in 0..(u16::MAX - 1) {
