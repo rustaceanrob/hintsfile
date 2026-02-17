@@ -137,8 +137,22 @@ impl EliasFano {
 
     /// Size of the representation in bytes.
     #[inline]
-    pub fn size(&self) -> usize {
-        size_of::<u32>() + size_of::<u32>() + self.low.len() + self.high.len()
+    pub fn approximate_size(&self) -> usize {
+        let size_n = if self.n < u8::MAX as u32 {
+            1
+        } else if self.n < u16::MAX as u32 {
+            3
+        } else {
+            5
+        };
+        let size_m = if self.m < u8::MAX as u32 {
+            1
+        } else if self.m < u16::MAX as u32 {
+            3
+        } else {
+            5
+        };
+        size_n + size_m + self.low.len() + self.high.len()
     }
 
     /// The number of lower bits in the representation, floor(log_2((`m` + 1)/ `n`)) where `n` is
@@ -151,9 +165,7 @@ impl EliasFano {
 
     /// Read a list representation from disk.
     pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self, std::io::Error> {
-        let mut n_buf = [0u8; 4];
-        reader.read_exact(&mut n_buf)?;
-        let n = u32::from_le_bytes(n_buf);
+        let n = read_compact_size(reader)?;
         if n == 0 {
             return Ok(Self {
                 n,
@@ -162,9 +174,7 @@ impl EliasFano {
                 high: Vec::new(),
             });
         }
-        let mut m_buf = [0u8; 4];
-        reader.read_exact(&mut m_buf)?;
-        let m = u32::from_le_bytes(m_buf);
+        let m = read_compact_size(reader)?;
         let l = Self::l(m, n);
         let low_bytes = (n as usize * l as usize).div_ceil(8);
         let mut low_buf = vec![0u8; low_bytes];
@@ -181,23 +191,54 @@ impl EliasFano {
         })
     }
 
-    /// Serialize this representation to bytes.
-    #[inline]
-    pub fn serialize(self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(self.size());
-        bytes.extend_from_slice(&self.n.to_le_bytes());
-        if self.n == 0 {
-            return bytes;
-        }
-        bytes.extend_from_slice(&self.m.to_le_bytes());
-        bytes.extend_from_slice(&self.low);
-        bytes.extend_from_slice(&self.high);
-        bytes
-    }
-
     #[inline]
     pub fn write<W: Write>(self, writer: &mut W) -> Result<(), std::io::Error> {
-        writer.write_all(&self.serialize())
+        write_compact_size(self.n, writer)?;
+        if self.n == 0 {
+            return Ok(());
+        }
+        write_compact_size(self.m, writer)?;
+        writer.write_all(&self.low)?;
+        writer.write_all(&self.high)?;
+        Ok(())
+    }
+}
+
+#[inline]
+fn write_compact_size<W: Write>(value: u32, writer: &mut W) -> Result<(), std::io::Error> {
+    match value {
+        0..=0xFC => {
+            writer.write_all(&[value as u8]) // Cast ok because of match.
+        }
+        0xFD..=0xFFFF => {
+            let v = (value as u16).to_le_bytes(); // Cast ok because of match.
+            writer.write_all(&[0xFD, v[0], v[1]])
+        }
+        0x10000..=0xFFFFFFFF => {
+            let v = value.to_le_bytes(); // Cast ok because of match.
+            writer.write_all(&[0xFE, v[0], v[1], v[2], v[3]])
+        }
+    }
+}
+
+#[inline]
+fn read_compact_size<R: Read>(reader: &mut R) -> Result<u32, std::io::Error> {
+    let mut buf: [u8; 1] = [0; 1];
+    reader.read_exact(&mut buf)?;
+    let prefix = buf[0];
+    match prefix {
+        0xFD => {
+            let mut buf: [u8; 2] = [0; 2];
+            reader.read_exact(&mut buf)?;
+            Ok(u16::from_le_bytes(buf) as u32)
+        }
+        0xFE => {
+            let mut buf: [u8; 4] = [0; 4];
+            reader.read_exact(&mut buf)?;
+            Ok(u32::from_le_bytes(buf))
+        }
+        0..=0xFC => Ok(prefix as u32),
+        _ => panic!("unexpected large offset"),
     }
 }
 
