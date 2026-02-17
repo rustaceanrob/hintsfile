@@ -240,6 +240,12 @@ impl Hintsfile {
         self.map.get(&height).map(|ef| ef.decompress())
     }
 
+    /// Get the unspent indices for a block height and remove them from memory. Returns `None` if
+    /// unavaiable.
+    pub fn take_indices(&mut self, height: u32) -> Option<Vec<u16>> {
+        self.map.remove(&height).map(|ef| ef.decompress())
+    }
+
     /// The last height this file encodes for.
     pub fn stop_height(&self) -> u32 {
         self.map.keys().max().copied().unwrap_or_default()
