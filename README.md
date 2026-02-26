@@ -4,16 +4,16 @@ _SwiftSync_ is a protocol to accelerate the initial block download for Bitcoin c
 
 ## Methodology
 
-The file encodes monotonically increasing indices within a block for which coins remain unspent. Given a block of `M` elements, suppose `N` are not spent, then the file encodes these positions with $ 2n + n \lceil \log_2(m/n) \rceil $ bits. This is near the optimum of $ \log_2 \binom{m}{n} $
+The file encodes monotonically increasing indices within a block for which coins remain unspent. Given a block of `M` elements, suppose `N` are not spent, then the file encodes these positions with $`2n + n \lceil \log_2(m/n) \rceil`$ bits. This is near the optimum of $`\log_2 \binom{m}{n}`$
 
 The technique used for this encoding was developed by _Elias_ and _Fano_, which you may read about [here](https://t.holmium.no/dia/elias-fano/).
 
 ## Usage
 
-```cargo add bitcoin-hintsfile```
+```cargo add hintsfile```
 
 ```rust
-use bitcoin_hintsfile::Hintsfile;
+use hintsfile::Hintsfile;
 
 // Load a file
 let hints = Hintsfile::from_reader(&mut file)?;
