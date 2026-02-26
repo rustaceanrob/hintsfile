@@ -2,5 +2,12 @@
 name = "hintsfile"
 version = "0.1.0"
 edition = "2021"
+authors = ["Robert Netzke <rob@2140.dev>"]
+license = "CC0-1.0"
+description = "A concise representation of the Bitcoin UTXO set"
+repository = "https://github.com/rustaceanrob/hintsfile"
+readme = "README.md"
+keywords = ["bitcoin", "cryptography", "network", "peer-to-peer"]
+categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
