@@ -246,6 +246,7 @@ fn read_compact_size<R: Read>(reader: &mut R) -> Result<u32, std::io::Error> {
 #[derive(Debug)]
 pub struct Hintsfile {
     map: BTreeMap<u32, EliasFano>,
+    stop_height: u32,
 }
 
 impl Hintsfile {
@@ -273,7 +274,7 @@ impl Hintsfile {
             let ef = EliasFano::from_reader(reader)?;
             map.insert(height, ef);
         }
-        Ok(Self { map })
+        Ok(Self { map, stop_height })
     }
 
     /// Get the unspent indices for a block height. Returns `None` if unavailable.
@@ -289,7 +290,7 @@ impl Hintsfile {
 
     /// The last height this file encodes for.
     pub fn stop_height(&self) -> u32 {
-        self.map.keys().max().copied().unwrap_or_default()
+        self.stop_height
     }
 }
 
@@ -331,10 +332,10 @@ mod sealed {
     pub trait Sealed {}
 }
 
-impl sealed::Sealed for crate::StageNew {}
-impl sealed::Sealed for crate::StageInProgress {}
+impl sealed::Sealed for StageNew {}
+impl sealed::Sealed for StageInProgress {}
 
-/// Stage of hintsfile prgroess.
+/// Stage of hintsfile progress.
 pub trait Stage: sealed::Sealed {}
 
 impl Stage for StageNew {}
