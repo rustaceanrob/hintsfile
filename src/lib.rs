@@ -16,7 +16,7 @@ pub struct EliasFano {
 impl EliasFano {
     /// Compress a unique, ordered set of elements.
     pub fn compress(elements: &[u32]) -> Self {
-        debug_assert!(elements.is_sorted());
+        debug_assert!(elements.windows(2).all(|w| w[0] < w[1]));
         debug_assert!(elements.len() < u32::MAX as usize);
         if elements.is_empty() {
             return Self {
