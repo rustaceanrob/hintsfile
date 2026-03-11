@@ -18,3 +18,7 @@ use hintsfile::Hintsfile;
 // Load a file
 let hints = Hintsfile::from_reader(&mut file)?;
 ```
+
+## MSRV
+
+This crate compiles with a toolchain of **1.80.0** or higher.
