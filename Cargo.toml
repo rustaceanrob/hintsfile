@@ -9,5 +9,6 @@ repository = "https://github.com/rustaceanrob/hintsfile"
 readme = "README.md"
 keywords = ["bitcoin", "cryptography", "network", "peer-to-peer"]
 categories = ["cryptography::cryptocurrencies"]
+rust-version = "1.80.0"
 
 [dependencies]
